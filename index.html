@@ -71,6 +71,24 @@
   <div class="card hidden" id="apkCard">
     <h2 id="apkTitle">Android-App</h2>
     <div id="apkBody"></div>
+    <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:12px">
+      <b>App-Icon</b>
+      <div class="row" style="align-items:flex-start">
+        <canvas id="iconPrev" width="1024" height="1024" style="width:96px;height:96px;border-radius:22px;border:1px solid var(--bd)"></canvas>
+        <div style="flex:1;min-width:180px">
+          <label for="iconText" style="margin-top:0">Emoji oder Buchstabe</label>
+          <input type="text" id="iconText" maxlength="6">
+          <label for="iconColor">Hintergrundfarbe</label>
+          <input type="color" id="iconColor" value="#3b6cf6">
+        </div>
+      </div>
+      <div class="row">
+        <button class="sec" id="iconPick">Eigenes Bild wählen…</button>
+        <button id="iconSave">Icon übernehmen &amp; neu bauen</button>
+      </div>
+      <input type="file" id="iconFile" accept="image/*" hidden>
+      <div class="mut" style="margin-top:6px">Neue Icons erscheinen nach dem Installieren der neu gebauten APK.</div>
+    </div>
     <div class="row">
       <button class="sec" id="apkRebuild">Neu bauen</button>
       <button class="sec" id="apkClose">Schließen</button>
@@ -98,7 +116,7 @@
       <button class="sec" id="closeEdit">Schließen</button>
     </div>
     <input type="file" id="replaceFile" accept=".html,.htm,text/html" hidden>
-    <div class="mut" style="margin-top:6px">Nach dem Speichern dauert es meist 1–2 Minuten, bis die Seite aktualisiert ist. Ist für das Projekt die Android-App eingerichtet, wird die APK dabei automatisch neu gebaut (ca. 4–6 Minuten).</div>
+    <div class="mut" style="margin-top:6px">Nach dem Speichern dauert es meist 1–2 Minuten, bis die Seite aktualisiert ist. Eine installierte Android-App holt sich die neue Version beim nächsten Start selbst, wenn das Handy online ist. Die APK zum Herunterladen wird dabei zusätzlich neu gebaut (ca. 4–6 Minuten).</div>
   </div>
 </main>
 
@@ -149,7 +167,47 @@ jobs:
       - name: Capacitor-Projekt erzeugen
         run: |
           mkdir -p _build/www
-          rsync -a --exclude='.git' --exclude='.github' --exclude='.apk-signing' --exclude='_build' --exclude='apk.json' --exclude='README.md' ./ _build/www/
+          rsync -a --exclude='.git' --exclude='.github' --exclude='.apk-signing' --exclude='_build' --exclude='apk.json' --exclude='apk-icon.png' --exclude='README.md' ./ _build/www/
+          mv _build/www/index.html _build/www/app.html
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [ "$REPO" = "$OWNER.github.io" ]; then PAGES_URL="https://$OWNER.github.io/"; else PAGES_URL="https://$OWNER.github.io/$REPO/"; fi
+          cat > _build/www/index.html <<'LOADER'
+          <!doctype html>
+          <html lang="de"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title></title>
+          <style>html,body{margin:0;height:100%;background:#111}</style></head>
+          <body>
+          <script>
+          (async function () {
+            var REMOTE = '__REMOTE__', BUILD = '__BUILD__';
+            var current = null, cache = null;
+            try {
+              cache = await caches.open('apk-loader');
+              var hit = await cache.match('app.html');
+              if (hit && hit.headers.get('x-build') === BUILD) current = await hit.text();
+            } catch (e) {}
+            if (current === null) current = await (await fetch('app.html')).text();
+            try {
+              var ctl = new AbortController();
+              var t = setTimeout(function () { ctl.abort(); }, 3000);
+              var r = await fetch(REMOTE, { cache: 'no-cache', signal: ctl.signal });
+              var txt = r.ok ? await r.text() : '';
+              clearTimeout(t);
+              if (txt && /<html|<!doctype/i.test(txt.slice(0, 2000)) && txt !== current) {
+                current = txt;
+                if (cache) await cache.put('app.html', new Response(txt, { headers: { 'x-build': BUILD, 'content-type': 'text/html' } }));
+              }
+            } catch (e) {}
+            document.open();
+            document.write(current);
+            document.close();
+          })();
+          <\/script>
+          </body></html>
+          LOADER
+          sed -i -e "s#__REMOTE__#${PAGES_URL}index.html#" -e "s#__BUILD__#${GITHUB_RUN_NUMBER}#" _build/www/index.html
           cd _build
           npm init -y > /dev/null
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
@@ -158,6 +216,14 @@ jobs:
           sed -i 's#</manifest>#    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
           sed -i "s/versionCode 1/versionCode $GITHUB_RUN_NUMBER/" android/app/build.gradle
           npx cap sync android
+      - name: Icon erzeugen
+        if: hashFiles('apk-icon.png') != ''
+        continue-on-error: true
+        working-directory: _build
+        run: |
+          mkdir -p assets
+          cp ../apk-icon.png assets/icon-only.png
+          npx --yes @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff'
       - name: APK bauen
         working-directory: _build/android
         run: ./gradlew assembleDebug --no-daemon
@@ -176,7 +242,7 @@ const $ = id => document.getElementById(id);
 const API = 'https://api.github.com';
 let token = '', user = '', pendingHTML = null, editing = null, repos = [];
 let apkCurrent = null, apkTimer = null;
-const WF = $('wf').textContent.replace(/^\n/, '');
+const WF = $('wf').textContent.replace(/^\n/, '').replace(/<\\\/script>/g, '<' + '/script>');
 
 function status(msg, cls){ $('status').innerHTML = msg ? `<span class="${cls||''}">${msg}</span>` : ''; }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -270,14 +336,17 @@ async function getFile(name, path, branch){
   try { return await gh(`/repos/${user}/${name}/contents/${path}?ref=${branch}`); }
   catch(e){ if (e.status === 404) return null; throw e; }
 }
-async function putIfDifferent(name, path, text, branch, msg){
+async function putB64(name, path, b64, branch, msg){
   const cur = await getFile(name, path, branch);
-  if (cur && fromB64(cur.content) === text) return false;
+  if (cur && (cur.content || '').replace(/\s/g, '') === b64) return false;
   await gh(`/repos/${user}/${name}/contents/${path}`, {method:'PUT', body:{
-    message: msg, content: toB64(text), branch, ...(cur ? {sha: cur.sha} : {})
+    message: msg, content: b64, branch, ...(cur ? {sha: cur.sha} : {})
   }});
   return true;
 }
+const putIfDifferent = (name, path, text, branch, msg) => putB64(name, path, toB64(text), branch, msg);
+const dispatchBuild = (name, branch) =>
+  gh(`/repos/${user}/${name}/actions/workflows/apk.yml/dispatches`, {method:'POST', body:{ref: branch}});
 // Legt apk.json + Workflow ins Projekt. Das Hochladen löst den Bau aus; ohne Änderung wird er bei Bedarf manuell gestartet.
 async function setupApk(name, branch, appName, dispatchIfUnchanged){
   const existing = await getFile(name, 'apk.json', branch);
@@ -290,16 +359,60 @@ async function setupApk(name, branch, appName, dispatchIfUnchanged){
     const wfChanged = await putIfDifferent(name, '.github/workflows/apk.yml', WF, branch, 'APK: Build-Workflow');
     changed = changed || wfChanged;
   } catch(e){
-    if (/workflow/i.test(e.message)) throw new Error('Dem Token fehlt die Berechtigung „workflow“. Neuen Token mit Haken bei repo UND workflow erzeugen und oben speichern.');
+    // GitHub antwortet bei fehlender „workflow“-Berechtigung oft nur mit „Not Found“ (404) oder 403.
+    if (e.status === 404 || e.status === 403 || /workflow/i.test(e.message)) throw new Error('Dem Token fehlt vermutlich die Berechtigung „workflow“ (GitHub meldet dann nur „' + e.message + '“). Neuen Token (classic) mit Haken bei repo UND workflow erzeugen, oben einfügen und speichern, dann bei dem Projekt auf „APK“ tippen.');
     throw e;
   }
-  if (!changed && dispatchIfUnchanged) {
-    await gh(`/repos/${user}/${name}/actions/workflows/apk.yml/dispatches`, {method:'POST', body:{ref: branch}});
-  }
+  if (!changed && dispatchIfUnchanged) await dispatchBuild(name, branch);
   return changed;
 }
 
+let iconImg = null;
+function drawIcon(){
+  const c = $('iconPrev'), x = c.getContext('2d'), S = 1024;
+  x.clearRect(0, 0, S, S);
+  if (iconImg) {
+    const s = Math.min(iconImg.width, iconImg.height);
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, S, S);
+    x.drawImage(iconImg, (iconImg.width - s) / 2, (iconImg.height - s) / 2, s, s, 0, 0, S, S);
+    return;
+  }
+  x.fillStyle = $('iconColor').value; x.fillRect(0, 0, S, S);
+  const t = [...$('iconText').value.trim()].slice(0, 2).join('') || '?';
+  const size = [...t].length > 1 ? 420 : 600;
+  x.font = `700 ${size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif`;
+  x.fillStyle = '#ffffff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(t, S / 2, S / 2 + size * 0.04);
+}
+$('iconText').oninput = () => { iconImg = null; drawIcon(); };
+$('iconColor').oninput = () => { iconImg = null; drawIcon(); };
+$('iconPick').onclick = () => $('iconFile').click();
+$('iconFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { iconImg = await createImageBitmap(f); drawIcon(); }
+  catch(err){ status('Das Bild konnte nicht gelesen werden.', 'err'); }
+};
+$('iconSave').onclick = async () => {
+  if (!apkCurrent) return;
+  const {name, branch} = apkCurrent;
+  $('iconSave').disabled = true; status('Speichere Icon…');
+  try {
+    const b64 = $('iconPrev').toDataURL('image/png').split(',')[1];
+    const wfCh = await setupApk(name, branch, '', false);
+    const icCh = await putB64(name, 'apk-icon.png', b64, branch, 'APK: Icon');
+    if (!wfCh && !icCh) await dispatchBuild(name, branch);
+    status('Icon gespeichert, die App wird neu gebaut.', 'ok');
+    showApk(name, branch, true);
+  } catch(e){ status('Fehler: ' + esc(e.message), 'err'); }
+  $('iconSave').disabled = false;
+};
+
 function showApk(name, branch, fresh){
+  if (!apkCurrent || apkCurrent.name !== name) {
+    iconImg = null;
+    $('iconText').value = (name.charAt(0) || 'A').toUpperCase();
+    drawIcon();
+  }
   apkCurrent = {name, branch};
   $('apkCard').classList.remove('hidden');
   $('apkTitle').textContent = 'Android-App: ' + name;
@@ -322,7 +435,7 @@ function showApk(name, branch, fresh){
         $('apkBody').innerHTML = `<div class="ok">Fertig.</div>
           <div style="margin-top:6px"><a class="btn" href="${link}" target="_blank" rel="noopener">APK herunterladen</a>
           <button class="sec" id="apkCopy">Link kopieren</button></div>
-          <div class="mut" style="margin-top:8px">Auf dem Handy öffnen, Datei laden und installieren (die Installation aus dieser Quelle einmalig erlauben). Spätere Versionen aktualisieren die App.</div>`;
+          <div class="mut" style="margin-top:8px">Auf dem Handy öffnen, Datei laden und installieren (die Installation aus dieser Quelle einmalig erlauben). Änderungen an deiner HTML holt sich die installierte App beim Start selbst, wenn das Handy online ist. Eine neue APK brauchst du nur bei neuem Icon oder neuen Berechtigungen.</div>`;
         $('apkCopy').onclick = () => navigator.clipboard.writeText(link);
       } else {
         clearInterval(apkTimer);
@@ -355,8 +468,10 @@ async function apkFromList(name, branch){
     if (!(await getFile(name, 'index.html', branch))) { status('In diesem Projekt gibt es keine index.html.', 'err'); return; }
     const existing = await getFile(name, 'apk.json', branch);
     if (existing) {
-      status('');
-      showApk(name, branch, false);
+      // Workflow auf den neuesten Stand bringen; nur wenn er sich ändert, startet dabei ein neuer Bau.
+      const changed = await setupApk(name, branch, '', false);
+      status(changed ? 'Build-Einrichtung aktualisiert, die App wird neu gebaut.' : '', changed ? 'ok' : '');
+      showApk(name, branch, changed);
     } else {
       const nm = prompt('Name der App auf dem Handy:', name);
       if (nm === null) { status(''); return; }
