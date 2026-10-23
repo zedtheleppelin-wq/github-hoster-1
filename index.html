@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Github-Hoster</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#667085;--ac:#3b6cf6;--ok:#16794c;--err:#b42318;--bd:#e3e6ec}
+  @media (prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1d222b;--tx:#e8eaf0;--mut:#9aa3b2;--ac:#6b8cff;--ok:#4cc38a;--err:#ff7b72;--bd:#2c3340}}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+  main{max-width:760px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:8px 0 16px}
+  h2{font-size:17px;margin:0 0 10px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+  input[type=text],input[type=password],textarea{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:var(--tx);font:inherit}
+  textarea{font:13px/1.4 ui-monospace,Menlo,monospace;min-height:340px;white-space:pre}
+  button,.btn{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+  button.sec,.btn.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+  button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .drop{border:2px dashed var(--bd);border-radius:10px;padding:22px;text-align:center;color:var(--mut);cursor:pointer}
+  .drop.over{border-color:var(--ac);color:var(--ac)}
+  .proj{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--bd)}
+  .proj:first-of-type{border-top:0}
+  .proj b{word-break:break-all}
+  .mut{color:var(--mut);font-size:14px}
+  .ok{color:var(--ok)} .err{color:var(--err)}
+  #status{min-height:22px;margin:6px 0}
+  .hidden{display:none}
+  label{font-size:14px;color:var(--mut);display:block;margin:8px 0 4px}
+  label.chk{display:flex;gap:8px;align-items:center;color:var(--tx);font-size:15px;margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Github-Hoster</h1>
+
+  <div id="status"></div>
+
+  <!-- Einrichtung -->
+  <div class="card" id="setup">
+    <h2>1. Zugang</h2>
+    <div class="mut">Einmalig: Auf github.com → Settings → Developer settings → Personal access tokens → <i>Tokens (classic)</i> → Haken bei <b>repo</b> und <b>workflow</b> → Token erzeugen und hier einfügen. Er bleibt nur in diesem Browser gespeichert. (Der Haken bei <b>workflow</b> wird für die Android-App-Funktion gebraucht.)</div>
+    <label for="token">Token</label>
+    <input type="password" id="token" placeholder="ghp_…">
+    <div class="row">
+      <button id="saveToken">Speichern</button>
+      <span id="who" class="mut"></span>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card hidden" id="uploadCard">
+    <h2>2. HTML hochladen &amp; hosten</h2>
+    <div class="drop" id="drop">HTML-Datei hierher ziehen oder tippen zum Auswählen</div>
+    <input type="file" id="file" accept=".html,.htm,text/html" hidden>
+    <div id="fileInfo" class="mut" style="margin-top:6px"></div>
+    <label for="repoName">Projektname (wird Teil der Adresse)</label>
+    <input type="text" id="repoName" placeholder="mein-projekt">
+    <label class="chk"><input type="checkbox" id="makeApk" checked> Zusätzlich als Android-App (APK) bauen</label>
+    <label for="appName">App-Name auf dem Handy (leer = Projektname)</label>
+    <input type="text" id="appName" placeholder="Mein Projekt">
+    <div class="row">
+      <button id="go" disabled>Hochladen &amp; hosten</button>
+    </div>
+    <div id="result" style="margin-top:10px"></div>
+  </div>
+
+  <!-- APK -->
+  <div class="card hidden" id="apkCard">
+    <h2 id="apkTitle">Android-App</h2>
+    <div id="apkBody"></div>
+    <div class="row">
+      <button class="sec" id="apkRebuild">Neu bauen</button>
+      <button class="sec" id="apkClose">Schließen</button>
+    </div>
+  </div>
+
+  <!-- Projekte -->
+  <div class="card hidden" id="listCard">
+    <h2>Meine Projekte</h2>
+    <div class="row" style="margin-top:0">
+      <input type="text" id="filter" placeholder="Suchen…" style="flex:1;min-width:140px">
+      <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="onlyHosted" checked> nur gehostete</label>
+      <button class="sec" id="reload">Neu laden</button>
+    </div>
+    <div id="projects" style="margin-top:8px"></div>
+  </div>
+
+  <!-- Editor -->
+  <div class="card hidden" id="editCard">
+    <h2 id="editTitle">index.html bearbeiten</h2>
+    <textarea id="editor" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="saveEdit">Speichern (veröffentlichen)</button>
+      <button class="sec" id="replaceBtn">Durch Datei ersetzen…</button>
+      <button class="sec" id="closeEdit">Schließen</button>
+    </div>
+    <input type="file" id="replaceFile" accept=".html,.htm,text/html" hidden>
+    <div class="mut" style="margin-top:6px">Nach dem Speichern dauert es meist 1–2 Minuten, bis die Seite aktualisiert ist. Ist für das Projekt die Android-App eingerichtet, wird die APK dabei automatisch neu gebaut (ca. 4–6 Minuten).</div>
+  </div>
+</main>
+
+<!-- Build-Workflow, der bei „APK“ ins Projekt-Repository gelegt wird -->
+<script type="text/plain" id="wf">
+name: APK bauen
+on:
+  push:
+    paths-ignore:
+      - '.apk-signing/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apk-build
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Projektdaten lesen
+        run: |
+          echo "APP_NAME=$(jq -r .name apk.json)" >> "$GITHUB_ENV"
+          echo "APP_ID=$(jq -r .appId apk.json)" >> "$GITHUB_ENV"
+      - name: Signaturschluessel bereitstellen
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f .apk-signing/debug.keystore ]; then
+            mkdir -p .apk-signing
+            keytool -genkeypair -keystore .apk-signing/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            git config user.name "apk-bot"
+            git config user.email "apk-bot@users.noreply.github.com"
+            git add .apk-signing/debug.keystore
+            git commit -m "Signaturschluessel fuer die App"
+            git pull --rebase
+            git push
+          fi
+          cp .apk-signing/debug.keystore ~/.android/debug.keystore
+      - name: Capacitor-Projekt erzeugen
+        run: |
+          mkdir -p _build/www
+          rsync -a --exclude='.git' --exclude='.github' --exclude='.apk-signing' --exclude='_build' --exclude='apk.json' --exclude='README.md' ./ _build/www/
+          cd _build
+          npm init -y > /dev/null
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+          npx cap init "$APP_NAME" "$APP_ID" --web-dir www
+          npx cap add android
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          sed -i "s/versionCode 1/versionCode $GITHUB_RUN_NUMBER/" android/app/build.gradle
+          npx cap sync android
+      - name: APK bauen
+        working-directory: _build/android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: APK veroeffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="${GITHUB_REPOSITORY#*/}"
+          cp _build/android/app/build/outputs/apk/debug/app-debug.apk "$NAME.apk"
+          gh release view apk-latest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create apk-latest --repo "$GITHUB_REPOSITORY" --title "Android-App (APK)" --notes "Neueste Version der App als APK."
+          gh release upload apk-latest "$NAME.apk" --repo "$GITHUB_REPOSITORY" --clobber
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const API = 'https://api.github.com';
+let token = '', user = '', pendingHTML = null, editing = null, repos = [];
+let apkCurrent = null, apkTimer = null;
+const WF = $('wf').textContent.replace(/^\n/, '');
+
+function status(msg, cls){ $('status').innerHTML = msg ? `<span class="${cls||''}">${msg}</span>` : ''; }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function gh(path, opts = {}){
+  const r = await fetch(API + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(opts.body ? {'Content-Type':'application/json'} : {}),
+      ...(opts.headers||{})
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  let data = null;
+  try { data = await r.json(); } catch(e){}
+  if (!r.ok) { const e = new Error((data && data.message) || ('Fehler ' + r.status)); e.status = r.status; throw e; }
+  return data;
+}
+
+function toB64(str){
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function fromB64(b64){
+  const bin = atob(b64.replace(/\s/g, ''));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+function slug(s){
+  return s.toLowerCase().replace(/\.html?$/,'').normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80);
+}
+const pagesUrl = (repo) => `https://${user}.github.io/${repo}/`;
+
+/* ---------- Login ---------- */
+async function login(){
+  if (!token) return;
+  try {
+    const me = await gh('/user');
+    user = me.login;
+    $('who').textContent = 'Angemeldet als ' + user;
+    $('uploadCard').classList.remove('hidden');
+    $('listCard').classList.remove('hidden');
+    status('');
+    loadProjects();
+  } catch(e){
+    status('Anmeldung fehlgeschlagen: ' + esc(e.message), 'err');
+  }
+}
+$('saveToken').onclick = () => {
+  token = $('token').value.trim();
+  if (!token) return;
+  try { localStorage.setItem('ghh_token', token); } catch(e){}
+  login();
+};
+try { token = localStorage.getItem('ghh_token') || ''; } catch(e){}
+if (token) { $('token').value = token; login(); }
+
+/* ---------- Datei wählen ---------- */
+function takeFile(f){
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    pendingHTML = rd.result;
+    $('fileInfo').textContent = f.name + ' (' + Math.round(f.size/1024) + ' KB)';
+    if (!$('repoName').value) $('repoName').value = slug(f.name) === 'index' ? '' : slug(f.name);
+    $('go').disabled = false;
+  };
+  rd.readAsText(f);
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => takeFile(e.target.files[0]);
+['dragover','dragenter'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave','drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => takeFile(e.dataTransfer.files[0]));
+
+/* ---------- Android-App (APK) ---------- */
+function cleanName(s){ return String(s||'').replace(/[<>&"'`$\\]/g, '').trim().slice(0, 40); }
+function appIdFor(name){
+  const s = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return 'app.hoster.p' + s;
+}
+const apkLink = name => `https://github.com/${user}/${name}/releases/download/apk-latest/${name}.apk`;
+
+async function getFile(name, path, branch){
+  try { return await gh(`/repos/${user}/${name}/contents/${path}?ref=${branch}`); }
+  catch(e){ if (e.status === 404) return null; throw e; }
+}
+async function putIfDifferent(name, path, text, branch, msg){
+  const cur = await getFile(name, path, branch);
+  if (cur && fromB64(cur.content) === text) return false;
+  await gh(`/repos/${user}/${name}/contents/${path}`, {method:'PUT', body:{
+    message: msg, content: toB64(text), branch, ...(cur ? {sha: cur.sha} : {})
+  }});
+  return true;
+}
+// Legt apk.json + Workflow ins Projekt. Das Hochladen löst den Bau aus; ohne Änderung wird er bei Bedarf manuell gestartet.
+async function setupApk(name, branch, appName, dispatchIfUnchanged){
+  const existing = await getFile(name, 'apk.json', branch);
+  let nm = cleanName(appName);
+  if (!nm && existing){ try { nm = cleanName(JSON.parse(fromB64(existing.content)).name); } catch(e){} }
+  if (!nm) nm = cleanName(name) || name;
+  const cfg = JSON.stringify({name: nm, appId: appIdFor(name)}, null, 2) + '\n';
+  let changed = await putIfDifferent(name, 'apk.json', cfg, branch, 'APK: App-Einstellungen');
+  try {
+    const wfChanged = await putIfDifferent(name, '.github/workflows/apk.yml', WF, branch, 'APK: Build-Workflow');
+    changed = changed || wfChanged;
+  } catch(e){
+    if (/workflow/i.test(e.message)) throw new Error('Dem Token fehlt die Berechtigung „workflow“. Neuen Token mit Haken bei repo UND workflow erzeugen und oben speichern.');
+    throw e;
+  }
+  if (!changed && dispatchIfUnchanged) {
+    await gh(`/repos/${user}/${name}/actions/workflows/apk.yml/dispatches`, {method:'POST', body:{ref: branch}});
+  }
+  return changed;
+}
+
+function showApk(name, branch, fresh){
+  apkCurrent = {name, branch};
+  $('apkCard').classList.remove('hidden');
+  $('apkTitle').textContent = 'Android-App: ' + name;
+  clearInterval(apkTimer);
+  const since = Date.now() - 60000;
+  let tries = 0;
+  const tick = async () => {
+    tries++;
+    try {
+      const r = await gh(`/repos/${user}/${name}/actions/workflows/apk.yml/runs?per_page=1`);
+      let run = r.workflow_runs && r.workflow_runs[0];
+      if (run && fresh && new Date(run.created_at).getTime() < since) run = null;
+      if (!run) {
+        $('apkBody').innerHTML = '<div class="mut">Der Bau wird gestartet… (ca. 4–6 Minuten)</div>';
+      } else if (run.status !== 'completed') {
+        $('apkBody').innerHTML = `<div class="mut">Wird gebaut… (ca. 4–6 Minuten) – <a href="${esc(run.html_url)}" target="_blank" rel="noopener">Verlauf</a></div>`;
+      } else if (run.conclusion === 'success') {
+        clearInterval(apkTimer);
+        const link = apkLink(name);
+        $('apkBody').innerHTML = `<div class="ok">Fertig.</div>
+          <div style="margin-top:6px"><a class="btn" href="${link}" target="_blank" rel="noopener">APK herunterladen</a>
+          <button class="sec" id="apkCopy">Link kopieren</button></div>
+          <div class="mut" style="margin-top:8px">Auf dem Handy öffnen, Datei laden und installieren (die Installation aus dieser Quelle einmalig erlauben). Spätere Versionen aktualisieren die App.</div>`;
+        $('apkCopy').onclick = () => navigator.clipboard.writeText(link);
+      } else {
+        clearInterval(apkTimer);
+        $('apkBody').innerHTML = `<div class="err">Der Bau ist fehlgeschlagen.</div>
+          <div class="mut"><a href="${esc(run.html_url)}" target="_blank" rel="noopener">Fehlerprotokoll ansehen</a></div>`;
+      }
+    } catch(e){
+      clearInterval(apkTimer);
+      $('apkBody').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    }
+    if (tries >= 60) clearInterval(apkTimer);
+  };
+  tick();
+  apkTimer = setInterval(tick, 15000);
+}
+$('apkClose').onclick = () => { clearInterval(apkTimer); $('apkCard').classList.add('hidden'); };
+$('apkRebuild').onclick = async () => {
+  if (!apkCurrent) return;
+  const {name, branch} = apkCurrent;
+  status('Starte neuen Bau…');
+  try {
+    await setupApk(name, branch, '', true);
+    status('');
+    showApk(name, branch, true);
+  } catch(e){ status('Fehler: ' + esc(e.message), 'err'); }
+};
+async function apkFromList(name, branch){
+  try {
+    status('Prüfe APK-Einrichtung…');
+    if (!(await getFile(name, 'index.html', branch))) { status('In diesem Projekt gibt es keine index.html.', 'err'); return; }
+    const existing = await getFile(name, 'apk.json', branch);
+    if (existing) {
+      status('');
+      showApk(name, branch, false);
+    } else {
+      const nm = prompt('Name der App auf dem Handy:', name);
+      if (nm === null) { status(''); return; }
+      await setupApk(name, branch, cleanName(nm), true);
+      status('APK-Bau eingerichtet und gestartet.', 'ok');
+      showApk(name, branch, true);
+    }
+    $('apkCard').scrollIntoView({behavior:'smooth'});
+  } catch(e){
+    status('Fehler: ' + esc(e.message), 'err');
+  }
+}
+
+/* ---------- Hochladen & hosten ---------- */
+$('go').onclick = async () => {
+  const name = slug($('repoName').value);
+  if (!name) { status('Bitte einen Projektnamen eintragen.', 'err'); return; }
+  if (pendingHTML == null) return;
+  $('go').disabled = true; $('result').innerHTML = '';
+  try {
+    status('Prüfe Projekt…');
+    let repo;
+    try { repo = await gh(`/repos/${user}/${name}`); }
+    catch(e){
+      if (e.status !== 404) throw e;
+      status('Lege Projekt an…');
+      repo = await gh('/user/repos', {method:'POST', body:{name, private:false, auto_init:true, description:'Hochgeladen mit Github-Hoster'}});
+    }
+    const branch = repo.default_branch || 'main';
+
+    status('Lade index.html hoch…');
+    let sha;
+    try { sha = (await gh(`/repos/${user}/${name}/contents/index.html?ref=${branch}`)).sha; } catch(e){ if (e.status !== 404) throw e; }
+    await gh(`/repos/${user}/${name}/contents/index.html`, {method:'PUT', body:{
+      message: sha ? 'Update index.html' : 'Add index.html',
+      content: toB64(pendingHTML), branch, ...(sha ? {sha} : {})
+    }});
+
+    status('Aktiviere Hosting…');
+    try { await gh(`/repos/${user}/${name}/pages`, {method:'POST', body:{source:{branch, path:'/'}}}); }
+    catch(e){ if (e.status !== 409) throw e; /* läuft schon */ }
+
+    const url = pagesUrl(name);
+    let apkErr = '', apkOn = false;
+    if ($('makeApk').checked) {
+      status('Richte Android-App ein…');
+      try {
+        await setupApk(name, branch, cleanName($('appName').value), false);
+        apkOn = true;
+      } catch(e){ apkErr = e.message; }
+    }
+    status('Fertig!', 'ok');
+    $('result').innerHTML = `<div class="ok">Online (in ca. 1–2 Minuten erreichbar):</div><a href="${url}" target="_blank" rel="noopener">${url}</a>
+      <div class="row"><button class="sec" id="copy">Link kopieren</button></div>
+      ${apkErr ? `<div class="err" style="margin-top:8px">Android-App nicht eingerichtet: ${esc(apkErr)}</div>` : ''}`;
+    $('copy').onclick = () => navigator.clipboard.writeText(url);
+    if (apkOn) showApk(name, branch, true);
+    pendingHTML = null; $('fileInfo').textContent = ''; $('repoName').value = ''; $('appName').value = '';
+    loadProjects();
+  } catch(e){
+    status('Fehler: ' + esc(e.message), 'err');
+    $('go').disabled = false;
+  }
+};
+
+/* ---------- Projektliste ---------- */
+async function loadProjects(){
+  $('projects').innerHTML = '<div class="mut">Lade…</div>';
+  try {
+    let all = [], page = 1;
+    while (true) {
+      const part = await gh(`/user/repos?per_page=100&page=${page}&sort=updated&affiliation=owner`);
+      all = all.concat(part);
+      if (part.length < 100) break;
+      page++;
+    }
+    repos = all;
+    renderProjects();
+  } catch(e){
+    $('projects').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+function renderProjects(){
+  const q = $('filter').value.trim().toLowerCase();
+  const only = $('onlyHosted').checked;
+  const list = repos.filter(r => (!only || r.has_pages) && r.name.toLowerCase().includes(q));
+  if (!list.length) { $('projects').innerHTML = '<div class="mut">Keine Projekte gefunden.</div>'; return; }
+  $('projects').innerHTML = list.map(r => `
+    <div class="proj">
+      <div>
+        <b>${esc(r.name)}</b>${r.private ? ' <span class="mut">(privat)</span>' : ''}<br>
+        ${r.has_pages ? `<a class="mut" href="${pagesUrl(r.name)}" target="_blank" rel="noopener">${pagesUrl(r.name)}</a>` : '<span class="mut">nicht gehostet</span>'}
+      </div>
+      <div class="row" style="margin:0">
+        <button class="sec" data-edit="${esc(r.name)}" data-branch="${esc(r.default_branch)}">Bearbeiten</button>
+        <button class="sec" data-apk="${esc(r.name)}" data-branch="${esc(r.default_branch)}">APK</button>
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openEditor(b.dataset.edit, b.dataset.branch));
+  document.querySelectorAll('[data-apk]').forEach(b => b.onclick = () => apkFromList(b.dataset.apk, b.dataset.branch));
+}
+$('filter').oninput = renderProjects;
+$('onlyHosted').onchange = renderProjects;
+$('reload').onclick = loadProjects;
+
+/* ---------- Editor ---------- */
+async function openEditor(name, branch){
+  status('Lade index.html…');
+  try {
+    const f = await gh(`/repos/${user}/${name}/contents/index.html?ref=${branch}`);
+    editing = {name, branch, sha: f.sha};
+    $('editor').value = fromB64(f.content);
+    $('editTitle').textContent = name + ' / index.html';
+    $('editCard').classList.remove('hidden');
+    $('editCard').scrollIntoView({behavior:'smooth'});
+    status('');
+  } catch(e){
+    status(e.status === 404 ? 'In diesem Projekt gibt es keine index.html.' : 'Fehler: ' + esc(e.message), 'err');
+  }
+}
+$('saveEdit').onclick = async () => {
+  if (!editing) return;
+  $('saveEdit').disabled = true; status('Speichere…');
+  try {
+    const res = await gh(`/repos/${user}/${editing.name}/contents/index.html`, {method:'PUT', body:{
+      message: 'Update index.html', content: toB64($('editor').value), branch: editing.branch, sha: editing.sha
+    }});
+    editing.sha = res.content.sha;
+    status('Gespeichert. Die Seite ist in 1–2 Minuten aktualisiert.', 'ok');
+  } catch(e){
+    status('Fehler: ' + esc(e.message), 'err');
+  }
+  $('saveEdit').disabled = false;
+};
+$('replaceBtn').onclick = () => $('replaceFile').click();
+$('replaceFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { $('editor').value = rd.result; status('Datei geladen – noch auf „Speichern“ klicken.'); };
+  rd.readAsText(f);
+};
+$('closeEdit').onclick = () => { $('editCard').classList.add('hidden'); editing = null; };
+</script>
+</body>
+</html>
